@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Test SQL Query</title>
+  <style>
+    pre {
+      background-color: #f4f4f4;
+      padding: 10px;
+      border: 1px solid #ddd;
+      overflow-x: auto;
+    }
+  </style>
+</head>
+<body>
+  <h1>Test SQL Query</h1>
+  <label for="sqlInput">Enter SQL Query:</label>
+  <br>
+  <textarea id="sqlInput" rows="5" cols="50"></textarea>
+  <br>
+  <button id="sendRequest">Send SQL Query</button>
+  <pre id="response"></pre>
+
+  <script>
+    document.getElementById('sendRequest').addEventListener('click', () => {
+      const sqlQuery = document.getElementById('sqlInput').value.trim();
+
+      fetch('http://<public_ip_or_domain>:3000/execute-query', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      sql: sqlQuery,
+      params: []
+    })
+  })
+  .then(response => response.json())
+  .then(data => {
+    document.getElementById('response').textContent = JSON.stringify(data, null, 2);
+  })
+  .catch(error => {
+    document.getElementById('response').textContent = 'Error: ' + error.message;
+  });
+    });
+  </script>
+</body>
+</html>
