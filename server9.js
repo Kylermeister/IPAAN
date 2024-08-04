@@ -3,8 +3,24 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 const { Pool } = require('pg');
 const NodeCache = require('node-cache');
+const swaggerJsDoc = require('swagger-jsdoc');
+const swaggerUI = require('swagger-ui-express');
 
 const app = express();
+
+const swaggerOptions = {
+  swaggerDefinition: {
+    info: {
+      title: "IPAAN Backend API",
+      version: '1.0.0',
+    },
+  },
+  apis: ["server9.js"],
+};
+
+const swaggerDocs = swaggerJsDoc(swaggerOptions);
+app.use('/api-docs', swaggerUI.serve, swaggerUI.setup(swaggerDocs));
+
 const pool = new Pool({
   user: 'admin',
   host: 'localhost',
@@ -37,6 +53,280 @@ const validateSelectQuery = (req, res, next) => {
 
   next();
 };
+
+/**
+ * @swagger
+ * /query/line:
+ *   post:
+ *     tags:
+ *       - Example
+ *     summary: submit line graph request
+ *     description: Returns the average upload and download speed as well as latency and lossrate of the specified filters for each day in the duration. The 3 filters can each be empty, but elements must be seperated by a comma. Dates must be included and sent using the format "YYYY-MM-DD".
+ *     consumes:
+ *       - application/json
+ *     produces:
+ *       - application/json
+ *     parameters:
+ *       - in: body
+ *         name: body
+ *         required: true
+ *         schema:
+ *           type: object
+ *           properties:
+ *             filters:
+ *               type: object
+ *               properties:
+ *                 countries:
+ *                   type: array
+ *                   example: ["ZA"]
+ *                 cities:
+ *                   type: array
+ *                   example: ["Cape Town","Durban","Pretoria","Bloemfontein"]
+ *                 isps:
+ *                   type: array
+ *                   example: ["Vodacom","Telkom SA Ltd.","MTN SA","Afrihost (Pty) Ltd"]
+ *             startDate:
+ *               type: string
+ *               format: date
+ *               example: "2024-01-01"
+ *             endDate:
+ *               type: string
+ *               format: date
+ *               example: "2024-03-31"
+ *     responses:
+ *       200:
+ *         description: The first item in the response to the example should be the following.
+ *         schema:
+ *           type: object
+ *           properties:
+ *             date:
+ *               type: string
+ *               format: date
+ *               example: "2024-01-01"
+ *             city:
+ *               type: string
+ *               example: "Bloemfontein"
+ *             countrycode:
+ *               type: string
+ *               example: "ZA"
+ *             isp:
+ *               type: string
+ *               example: "Afrihost (Pty) Ltd"
+ *             download:
+ *               type: string
+ *               example: "40.52"
+ *             upload:
+ *               type: string
+ *               example: "37.57"
+ *             lossrate:
+ *               type: string
+ *               example: "0.86"
+ */
+app.post('/query/line', async (req, res) => {
+  const { filters, startDate, endDate } = req.body;
+  if (!filters || (!filters.cities && !filters.countries && !filters.isps)) {
+    return res.status(400).send('At least one filter is required');
+  }
+
+  const sql = buildLineQuery(filters, startDate, endDate);
+  req.body.sql = sql;
+  validateSelectQuery(req, res, () => executeQuery(sql, res));
+});
+
+/**
+ * @swagger
+ * /query/bar:
+ *   post:
+ *     tags:
+ *       - Example
+ *     summary: submit bar graph request
+ *     description: Returns the average upload and download speed as well as latency and lossrate of the specified filters for each day in the duration. The 3 filters can each be empty, but elements must be seperated by a comma. Dates must be included and sent using the format "YYYY-MM-DD".
+ *     consumes:
+ *       - application/json
+ *     produces:
+ *       - application/json
+ *     parameters:
+ *       - in: body
+ *         name: body
+ *         required: true
+ *         schema:
+ *           type: object
+ *           properties:
+ *             filters:
+ *               type: object
+ *               properties:
+ *                 countries:
+ *                   type: array
+ *                   example: ["ZA"]
+ *                 cities:
+ *                   type: array
+ *                   example: ["Cape Town","Durban","Pretoria","Bloemfontein"]
+ *                 isps:
+ *                   type: array
+ *                   example: ["Vodacom","Telkom SA Ltd.","MTN SA","Afrihost (Pty) Ltd"]
+ *             startDate:
+ *               type: string
+ *               format: date
+ *               example: "2024-01-01"
+ *             endDate:
+ *               type: string
+ *               format: date
+ *               example: "2024-03-31"
+ *     responses:
+ *       200:
+ *         description: The first item in the response to the example should be the following.
+ *         schema:
+ *           type: object
+ *           properties:
+ *            city:
+ *               type: string
+ *               example: "Bloemfontein"
+ *            countrycode:
+ *               type: string
+ *               example: "ZA"
+ *            isp:
+ *               type: string
+ *               example: "Afrihost (Pty) Ltd"
+ *            download:
+ *               type: string
+ *               example: "62.00"
+ *            upload:
+ *               type: string
+ *               example: "47.46"
+ */
+app.post('/query/bar', async (req, res) => {
+  const { filters, startDate, endDate } = req.body;
+  if (!filters || (!filters.cities && !filters.countries && !filters.isps)) {
+    return res.status(400).send('At least one filter is required');
+  }
+
+  const sql = buildBarQuery(filters, startDate, endDate);
+  req.body.sql = sql;
+  validateSelectQuery(req, res, () => executeQuery(sql, res));
+});
+
+/**
+ * @swagger
+ * /query/pie:
+ *   post:
+ *     tags:
+ *       - Example
+ *     summary: submit pie graph request
+ *     description: Finds the number of tests performed across all selected cities in the date range of format "YYYY-MM-DD", then returns how many each city has, as well as how much percentage of the group total they are.
+ *     consumes:
+ *       - application/json
+ *     produces:
+ *       - application/json
+ *     parameters:
+ *       - in: body
+ *         name: body
+ *         required: true
+ *         schema:
+ *           type: object
+ *           properties:
+ *             filters:
+ *               type: object
+ *               properties:
+ *                 countries:
+ *                   type: array
+ *                   example: []
+ *                 cities:
+ *                   type: array
+ *                   example: ["Cape Town","Durban","Pretoria","Bloemfontein"]
+ *                 isps:
+ *                   type: array
+ *                   example: []
+ *             startDate:
+ *               type: string
+ *               format: date
+ *               example: "2024-01-01"
+ *             endDate:
+ *               type: string
+ *               format: date
+ *               example: "2024-03-31"
+ *     responses:
+ *       200:
+ *         description: The first item in the response to the example should be the following.
+ *         schema:
+ *           type: object
+ *           properties:
+ *             city:
+ *               type: string
+ *               example: "Cape Town"
+ *             group_count:
+ *               type: string
+ *               example: "979117"
+ *             percentage_of_total:
+ *               type: string
+ *               example: "49.86"
+ */
+app.post('/query/pie', async (req, res) => {
+  const { filters, startDate, endDate } = req.body;
+  if (!filters || (!filters.cities && !filters.countries && !filters.isps)) {
+    return res.status(400).send('At least one filter is required');
+  }
+
+  const sql = buildPieQuery(filters, startDate, endDate);
+  req.body.sql = sql;
+  validateSelectQuery(req, res, () => executeQuery(sql, res));
+});
+
+/**
+ * @swagger
+ * /query/map:
+ *   post:
+ *     tags:
+ *       - Example
+ *     summary: submit map request
+ *     description: Returns the selection of map points across all the filters in the date field in the format "YYYY-MM-DD" as well as their respective download speeds.
+ *     consumes:
+ *       - application/json
+ *     produces:
+ *       - application/json
+ *     parameters:
+ *       - in: body
+ *         name: body
+ *         required: true
+ *         schema:
+ *           type: object
+ *           properties:
+ *             filters:
+ *               type: object
+ *               properties:
+ *                 countries:
+ *                   type: array
+ *                   example: ["ZA"]
+ *                 cities:
+ *                   type: array
+ *                   example: ["Cape Town","Durban","Pretoria","Bloemfontein"]
+ *                 isps:
+ *                   type: array
+ *                   example: ["Vodacom","Telkom SA Ltd.","MTN SA","Afrihost (Pty) Ltd"]
+ *             startDate:
+ *               type: string
+ *               format: date
+ *               example: "2024-01-01"
+ *             endDate:
+ *               type: string
+ *               format: date
+ *               example: "2024-03-31"
+ *     responses:
+ *       200:
+ *         description: The first item in the response to the example should be the following.
+ *         schema:
+ *           type: number
+ *           example: [-29.1252,26.163,21.1]
+ */
+app.post('/query/map', async (req, res) => {
+  const { filters, startDate, endDate } = req.body;
+  if (!filters || (!filters.cities && !filters.countries && !filters.isps)) {
+    return res.status(400).send('At least one filter is required');
+  }
+
+  const sql = buildMapQuery(filters, startDate, endDate);
+  req.body.sql = sql;
+  validateSelectQuery(req, res, () => executeMapQuery(sql, res));
+});
 
 const buildLineQuery = (filters, startDate, endDate) => {
   const { cities, countries, isps } = filters;
@@ -154,10 +444,9 @@ const buildLineQuery = (filters, startDate, endDate) => {
         `;
       }
 
-      query +=`y.Speed as Download,
-      u.speed AS Upload,
-      y.Latency,
-      y.Lossrate
+      query +=`ROUND(y.Speed::numeric,2) as Download,
+      ROUND(u.speed::numeric,2) AS Upload,
+      ROUND(y.Lossrate::numeric,2) as Lossrate
     FROM download_data y
     LEFT JOIN upload_data u ON y.date = u.date `
 
@@ -181,19 +470,6 @@ const buildLineQuery = (filters, startDate, endDate) => {
 
   return query;
 };
-
-
-app.post('/query/line', async (req, res) => {
-  const { filters, startDate, endDate } = req.body;
-  if (!filters || (!filters.cities && !filters.countries && !filters.isps)) {
-    return res.status(400).send('At least one filter is required');
-  }
-
-  const sql = buildLineQuery(filters, startDate, endDate);
-  req.body.sql = sql;
-  validateSelectQuery(req, res, () => executeQuery(sql, res));
-});
-
 
 const buildBarQuery = (filters, startDate, endDate) => {
   const { cities, countries, isps } = filters;
@@ -250,8 +526,8 @@ const buildBarQuery = (filters, startDate, endDate) => {
     )
     SELECT
       ${groupByFields.join(",").replace(/y.city/g, 'd.city')},
-      d.download,
-      y.upload
+      ROUND(d.download::numeric,2) AS download,
+      ROUND(y.upload::numeric,2) AS upload
     FROM download_data d
     LEFT JOIN upload_data y ON 1=1 `
 
@@ -275,7 +551,6 @@ const buildBarQuery = (filters, startDate, endDate) => {
   
   return query;
 };
-
 
 const buildPieQuery = (filters, startDate, endDate) => {
   const { cities, countries, isps } = filters;
@@ -326,7 +601,7 @@ if (isps && isps.length > 0) {
 }
 
 query += ` AND x.date BETWEEN '${startDate}' AND '${endDate}'
- limit (1000)`
+ limit (10000)`
 
   return query;
 };
@@ -349,41 +624,6 @@ const executeQuery = async (sql, res) => {
     res.status(500).send('Server error');
   }
 };
-
-
-// Placeholder endpoints for other query types
-app.post('/query/bar', async (req, res) => {
-  const { filters, startDate, endDate } = req.body;
-  if (!filters || (!filters.cities && !filters.countries && !filters.isps)) {
-    return res.status(400).send('At least one filter is required');
-  }
-
-  const sql = buildBarQuery(filters, startDate, endDate);
-  req.body.sql = sql;
-  validateSelectQuery(req, res, () => executeQuery(sql, res));
-});
-
-app.post('/query/pie', async (req, res) => {
-  const { filters, startDate, endDate } = req.body;
-  if (!filters || (!filters.cities && !filters.countries && !filters.isps)) {
-    return res.status(400).send('At least one filter is required');
-  }
-
-  const sql = buildPieQuery(filters, startDate, endDate);
-  req.body.sql = sql;
-  validateSelectQuery(req, res, () => executeQuery(sql, res));
-});
-
-app.post('/query/map', async (req, res) => {
-  const { filters, startDate, endDate } = req.body;
-  if (!filters || (!filters.cities && !filters.countries && !filters.isps)) {
-    return res.status(400).send('At least one filter is required');
-  }
-
-  const sql = buildMapQuery(filters, startDate, endDate);
-  req.body.sql = sql;
-  validateSelectQuery(req, res, () => executeMapQuery(sql, res));
-});
 
 const executeMapQuery = async (sql, res) => {
   const cacheKey = `query_${Buffer.from(sql).toString('base64')}`;
