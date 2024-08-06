@@ -328,6 +328,61 @@ app.post('/query/map', async (req, res) => {
   validateSelectQuery(req, res, () => executeMapQuery(sql, res));
 });
 
+/**
+ * @swagger
+ * /query/isp:
+ *   post:
+ *     tags:
+ *       - Example
+ *     summary: submit request for list of all isps. The server will first check the cities array, then the countries array, and will return all the isps in either list.
+ *     description: returns the full list of isps that 
+ *     consumes:
+ *       - application/json
+ *     produces:
+ *       - application/json
+ *     parameters:
+ *       - in: body
+ *         name: body
+ *         required: true
+ *         schema:
+ *           type: object
+ *           properties:
+ *             filters:
+ *               type: object
+ *               properties:
+ *                 countries:
+ *                   type: array
+ *                   example: []
+ *                 cities:
+ *                   type: array
+ *                   example: ["Cape Town","Durban","Pretoria","Bloemfontein"]
+ *                 isps:
+ *                   type: array
+ *                   example: []
+ *             startDate:
+ *               type: string
+ *               format: date
+ *               example: "2024-01-01"
+ *             endDate:
+ *               type: string
+ *               format: date
+ *               example: "2024-03-31"
+ *     responses:
+ *       200:
+ *         description: The first item in the response to the example should be the following.
+ *         schema:
+ *           type: object
+ *           properties:
+ *             city:
+ *               type: string
+ *               example: "Cape Town"
+ *             group_count:
+ *               type: string
+ *               example: "979117"
+ *             percentage_of_total:
+ *               type: string
+ *               example: "49.86"
+ */
 app.post('/query/isp', async (req, res) => {
     const { filters, startDate, endDate } = req.body;
     if (!filters || (!filters.cities && !filters.countries) || ((filters.cities.length == 0) && (filters.countries.length == 0)) ) {
@@ -335,6 +390,72 @@ app.post('/query/isp', async (req, res) => {
     }
   
     const sql = buildISPQuery(filters, startDate, endDate);
+    req.body.sql = sql;
+    validateSelectQuery(req, res, () => executeQuery(sql, res));
+  });
+
+/**
+ * @swagger
+ * /query/city:
+ *   post:
+ *     tags:
+ *       - Example
+ *     summary: submit pie graph request
+ *     description: Finds the number of tests performed across all selected cities in the date range of format "YYYY-MM-DD", then returns how many each city has, as well as how much percentage of the group total they are.
+ *     consumes:
+ *       - application/json
+ *     produces:
+ *       - application/json
+ *     parameters:
+ *       - in: body
+ *         name: body
+ *         required: true
+ *         schema:
+ *           type: object
+ *           properties:
+ *             filters:
+ *               type: object
+ *               properties:
+ *                 countries:
+ *                   type: array
+ *                   example: []
+ *                 cities:
+ *                   type: array
+ *                   example: ["Cape Town","Durban","Pretoria","Bloemfontein"]
+ *                 isps:
+ *                   type: array
+ *                   example: []
+ *             startDate:
+ *               type: string
+ *               format: date
+ *               example: "2024-01-01"
+ *             endDate:
+ *               type: string
+ *               format: date
+ *               example: "2024-03-31"
+ *     responses:
+ *       200:
+ *         description: The first item in the response to the example should be the following.
+ *         schema:
+ *           type: object
+ *           properties:
+ *             city:
+ *               type: string
+ *               example: "Cape Town"
+ *             group_count:
+ *               type: string
+ *               example: "979117"
+ *             percentage_of_total:
+ *               type: string
+ *               example: "49.86"
+ */
+app.post('/query/city', async (req, res) => {
+    const { filters, startDate, endDate } = req.body;
+    if (!filters || (!filters.isps && !filters.countries) || ((filters.isps.length == 0) && (filters.countries.length == 0)) ) {
+      return res.status(400).send('At least one filter is required');
+    }
+  
+    const sql = buildCityQuery(filters, startDate, endDate);
     req.body.sql = sql;
     validateSelectQuery(req, res, () => executeQuery(sql, res));
   });
@@ -457,6 +578,7 @@ const buildLineQuery = (filters, startDate, endDate) => {
 
       query +=`ROUND(y.Speed::numeric,2) as Download,
       ROUND(u.speed::numeric,2) AS Upload,
+      ROUND(y.Latency::numeric,2) AS Latency,
       ROUND(y.Lossrate::numeric,2) as Lossrate
     FROM download_data y
     LEFT JOIN upload_data u ON y.date = u.date `
@@ -634,6 +756,23 @@ const buildISPQuery = (filters, startDate, endDate) => {
     return query;
 };
 
+const buildCityQuery = (filters, startDate, endDate) => {
+    const { cities, countries, isps } = filters;
+
+    let query =`SELECT DISTINCT(city) from descriptors WHERE`
+
+    if (isps && isps.length > 0) {
+        const ispList = isps.map(isp => `'${isp}'`).join(',');
+        query += ` isp IN (${ispList})`;
+        
+      } else {
+        const countryList = countries.map(country => `'${country}'`).join(',');
+        query += ` countrycode IN (${countryList})`;
+      }
+    
+    return query;
+};
+
 const executeQuery = async (sql, res) => {
   const cacheKey = `query_${Buffer.from(sql).toString('base64')}`;
   const cachedData = myCache.get(cacheKey);
@@ -643,7 +782,7 @@ const executeQuery = async (sql, res) => {
   }
 
   try {
-    console.log(sql)
+    //console.log(sql)
     const result = await pool.query(sql);
     myCache.set(cacheKey, result.rows, 3600);
     res.status(200).json(result.rows);
