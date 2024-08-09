@@ -15,7 +15,7 @@ const swaggerOptions = {
       version: '1.0.0',
     },
   },
-  apis: ["server9.js"],
+  apis: ["server10.js"],
 };
 
 const swaggerDocs = swaggerJsDoc(swaggerOptions);
@@ -330,6 +330,78 @@ app.post('/query/map', async (req, res) => {
 
 /**
  * @swagger
+ * /query/difference:
+ *   post:
+ *     tags:
+ *       - Example
+ *     summary: submit request for differences between ISPs across each city
+ *     description: Compares each ISP to each other in each city, then selects the middlemost performing ISP and returns the relative difference of the rest to it.
+ *     consumes:
+ *       - application/json
+ *     produces:
+ *       - application/json
+ *     parameters:
+ *       - in: body
+ *         name: body
+ *         required: true
+ *         schema:
+ *           type: object
+ *           properties:
+ *             filters:
+ *               type: object
+ *               properties:
+ *                 countries:
+ *                   type: array
+ *                   example: ["ZA"]
+ *                 cities:
+ *                   type: array
+ *                   example: ["Cape Town","Durban","Pretoria","Bloemfontein"]
+ *                 isps:
+ *                   type: array
+ *                   example: ["Vodacom","Telkom SA Ltd.","MTN SA","Afrihost (Pty) Ltd"]
+ *             startDate:
+ *               type: string
+ *               format: date
+ *               example: "2024-01-01"
+ *             endDate:
+ *               type: string
+ *               format: date
+ *               example: "2024-03-31"
+ *     responses:
+ *       200:
+ *         description: The first item in the response to the example should be the following.
+ *         schema:
+ *           type: object
+ *           properties:
+ *             isp:
+ *               type: string
+ *               example: "Telkom SA Ltd"
+ *             city:
+ *               type: string
+ *               example: "Bloemfontein"
+ *             country:
+ *               type: string
+ *               example: "ZA"
+ *             download:
+ *               type: string
+ *               example: "18.59"
+ *             difference:
+ *               type: string
+ *               example: "-50.65"
+ */
+app.post('/query/difference', async (req, res) => {
+  const { filters, startDate, endDate } = req.body;
+  if (!filters || (!filters.isps && !filters.countries) || ((filters.isps.length == 0) && (filters.countries.length == 0)) ) {
+    return res.status(400).send('At least one filter is required');
+  }
+
+  const sql = buildDifferenceQuery(filters, startDate, endDate);
+  req.body.sql = sql;
+  validateSelectQuery(req, res, () => executeQuery(sql, res));
+});  
+
+/**
+ * @swagger
  * /query/isp:
  *   post:
  *     tags:
@@ -400,8 +472,8 @@ app.post('/query/isp', async (req, res) => {
  *   post:
  *     tags:
  *       - Example
- *     summary: submit pie graph request
- *     description: Finds the number of tests performed across all selected cities in the date range of format "YYYY-MM-DD", then returns how many each city has, as well as how much percentage of the group total they are.
+ *     summary: submit request to see all cities linked to a country or ISP
+ *     description: The request will first check if the ISP array, if there is nothing it will instead read the countrycodes. It will then return a list of all the cities linked to these items such as all the cities in a country or all the cities an isp works in.
  *     consumes:
  *       - application/json
  *     produces:
@@ -484,7 +556,7 @@ const buildLineQuery = (filters, startDate, endDate) => {
   }
 
   if (isps && isps.length > 0) {
-    selectFields.push("y.isp");
+    selectFields.push("RTRIM(y.isp,'.') as isp");
     groupByFields.push("y.isp");
     orderByFields.push("y.isp");
   }
@@ -628,7 +700,7 @@ const buildBarQuery = (filters, startDate, endDate) => {
   }
   
   if (isps && isps.length > 0) {
-    selectFields.push("y.isp");
+    selectFields.push("RTRIM(y.isp,'.') as isp");
     groupByFields.push("y.isp");
     joinConditions.push("y.isp");
     const ispList = isps.map(isp => `'${isp}'`).join(',');
@@ -739,10 +811,72 @@ query += ` AND x.date BETWEEN '${startDate}' AND '${endDate}'
   return query;
 };
 
+const buildDifferenceQuery = (filters, startDate, endDate) => {
+  const { cities, countries, isps } = filters;
+  const cityList = cities.map(city => `'${city}'`).join(',');
+  const ispList = isps.map(isp => `'${isp}'`).join(',');
+  const countryList = countries.map(country => `'${country}'`).join(',');
+
+  let query =`WITH grouped AS (
+    SELECT
+        y.isp as isp,
+        y.city as city,
+        y.countrycode as country,
+        AVG(x.meanthroughputmbps) AS avg_Y
+    FROM
+        download x
+        join descriptors y on x.descriptorid = y.id
+        where isp IN (${ispList})
+        and city IN (${cityList})
+        and countrycode in (${countryList})
+        and date BETWEEN '${startDate}' and '${endDate}'
+    GROUP BY
+        isp,city,country
+),
+ordered AS ( --
+    SELECT
+        isp,
+        city,
+        country,
+        avg_Y,
+        ROW_NUMBER() OVER (partition by city ORDER BY avg_Y) AS row_num,
+        COUNT(*) OVER (partition by city) AS total_rows_in_city
+    FROM
+        grouped
+),
+middle AS (
+    SELECT
+        isp,
+        city,
+        country,
+        avg_Y,
+        row_num,
+        total_rows_in_city,
+        avg_Y AS middle_avg_Y
+    FROM
+        ordered
+    WHERE
+        row_num = (total_rows_in_city + 1) / 2
+)
+SELECT
+    RTRIM(o.isp,'.') as isp,
+    o.city as city,
+    o.country as country,
+    ROUND(o.avg_Y::numeric,2) as Download,
+    ROUND(CAST(((o.avg_Y - m.middle_avg_Y) / m.middle_avg_Y) * 100 AS NUMERIC), 2) AS difference
+FROM
+    ordered o
+    JOIN middle m ON o.city = m.city
+ORDER BY
+    country,city,Download;`
+  
+  return query;
+};
+
 const buildISPQuery = (filters, startDate, endDate) => {
     const { cities, countries, isps } = filters;
 
-    let query =`SELECT DISTINCT(isp) from descriptors WHERE`
+    let query =`SELECT DISTINCT(RTRIM(isp,'.')) as isp from descriptors WHERE`
 
     if (cities && cities.length > 0) {
         const cityList = cities.map(city => `'${city}'`).join(',');

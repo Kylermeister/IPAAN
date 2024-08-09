@@ -1,0 +1,21 @@
+{
+    "filters": {
+      "countries": [
+        "ZA"
+      ],
+      "cities": [
+        "Cape Town",
+        "Durban",
+        "Pretoria",
+        "Bloemfontein"
+      ],
+      "isps": [
+        "Vodacom",
+        "Telkom SA Ltd.",
+        "MTN SA",
+        "Afrihost (Pty) Ltd"
+      ]
+    },
+    "startDate": "2024-01-01",
+    "endDate": "2024-03-31"
+  }
