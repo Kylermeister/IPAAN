@@ -15,18 +15,18 @@ const swaggerOptions = {
       version: '1.0.0',
     },
   },
-  apis: ["server10.js"],
+  apis: ["server11.js"],
 };
 
 const swaggerDocs = swaggerJsDoc(swaggerOptions);
 app.use('/api-docs', swaggerUI.serve, swaggerUI.setup(swaggerDocs));
 
 const pool = new Pool({
-  user: 'admin',
+  user: 'postgres',
   host: 'localhost',
   database: 'postgres',
-  password: 'kyler',
-  port: 5433,
+  password: 'rndkyl001',
+  port: 5432,
 });
 
 const myCache = new NodeCache();
@@ -536,7 +536,7 @@ const buildLineQuery = (filters, startDate, endDate) => {
   const { cities, countries, isps } = filters;
 
   let selectFields = [
-    "TO_CHAR(DATE_TRUNC('day', x.date), 'YYYY-MM-DD') AS date",
+    "x.date AS date",
     "(SUM(x.speed * x.count) / SUM(x.count)) AS Speed",
     "(SUM(x.latency * x.count) / SUM(x.count)) AS Latency"
   ];
